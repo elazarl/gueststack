@@ -1,0 +1,28 @@
+diff --git a/arch/x86/include/asm/kvm_host.h b/arch/x86/include/asm/kvm_host.h
+index dba6f79..bd3954f 100644
+--- a/arch/x86/include/asm/kvm_host.h
++++ b/arch/x86/include/asm/kvm_host.h
+@@ -1069,6 +1069,7 @@ extern bool kvm_find_async_pf_gfn(struct kvm_vcpu *vcpu, gfn_t gfn);
+ void kvm_complete_insn_gp(struct kvm_vcpu *vcpu, int err);
+ 
+ int kvm_is_in_guest(void);
++struct kvm_vcpu *get_current_vcpu(void);
+ 
+ void kvm_pmu_init(struct kvm_vcpu *vcpu);
+ void kvm_pmu_destroy(struct kvm_vcpu *vcpu);
+diff --git a/arch/x86/kvm/x86.c b/arch/x86/kvm/x86.c
+index 1d6e92c..c3b7c3c 100644
+--- a/arch/x86/kvm/x86.c
++++ b/arch/x86/kvm/x86.c
+@@ -5398,6 +5398,11 @@ static void kvm_timer_init(void)
+ 
+ static DEFINE_PER_CPU(struct kvm_vcpu *, current_vcpu);
+ 
++struct kvm_vcpu *get_current_vcpu() {
++	return __this_cpu_read(current_vcpu);
++}
++EXPORT_SYMBOL_GPL(get_current_vcpu);
++
+ int kvm_is_in_guest(void)
+ {
+ 	return __this_cpu_read(current_vcpu) != NULL;

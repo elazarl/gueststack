@@ -1,0 +1,38 @@
+<html>
+<title>Flamegraph for {{.Hostname}}</title>
+<style>
+span { font-weight: bold; }
+.running { color: darkgreen; background: lightgreen; }
+.stopped { color: black; background: orangered; }
+</style>
+<script>
+document.addEventListener("DOMContentLoaded", function(event) {
+	var buttons = document.getElementsByTagName("button");
+	for (var i =0; i<buttons.length; i++) {
+		buttons[i].addEventListener('click',function() {
+			var xhr = new XMLHttpRequest();
+			var action = this.getAttribute('data-url');
+			xhr.open('GET', '/api/'+action, true);
+			xhr.onload = function(e) {
+				if (this.status != 200) {
+					alert(this.responseText);
+				}
+			};
+			xhr.send();
+		}, true);
+	}
+});
+</script>
+<body>
+{{ if .Status }}
+<span class="running">Running</span>
+{{ else }}
+<span class="stopped">Stopped</span>
+{{ end }}
+<button data-url="reset">Reset</button>
+<button data-url="start">Start</button>
+<button data-url="stop">Stop</button>
+<br/>
+<object type="image/svg+xml" data="/flamegraph">Your browser does not support SVG</object>
+</body>
+</html>
