@@ -14,6 +14,19 @@ vulnerabilities. Use with caution.
 
 ## Quick Introduction
 
+### From Binary
+
+You have to have `gcc` and your kernel headers installed in order to use `gueststack`.
+
+This is since `gueststack` compiles the kernel module on your machine, otherwise it wouldn't
+be compatible with your kernel.
+
+    $ wget https://github.com/elazarl/gueststack/releases/download/alpha-v0.1/gueststack
+    $ chmod +x gueststack
+    $ sudo ./gueststack -ssh "sudo -u $USER ssh guest_ip"
+
+### Compiling From Source
+
 Make sure you have Go distribution installed.
 
     $ ./make.sh
@@ -89,6 +102,6 @@ allow easy way to filter things (e.g., show stacks of a specific VCPU).
 
 ## Thanks
 
-Brendan Gregg, for the flamegraph.pl script.
-Linux-il mailing list for discussing the problem.
+- Brendan Gregg, for the flamegraph.pl script.
+- Linux-il mailing list for discussing the problem.
 
