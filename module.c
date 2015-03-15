@@ -92,7 +92,7 @@ static int perf_event_nmi_handler(unsigned int cmd, struct pt_regs *regs)
 			pr_warn("can't read kernel page. ERROR %d\n", i);
 			return 1;
 		}
-		BUF_PRINTF(b, "CPU:%d RIP: %llx\n", smp_processor_id(),
+		BUF_PRINTF(b, "CPU:%d RIP: %llx\n", vcpu->vcpu_id,
 			   kvm_register_read(vcpu, VCPU_REGS_RIP));
 		for (i = 0; i < page_remainder / sizeof(u64); i++) {
 			if (addr_relevant(frames[i])) {
