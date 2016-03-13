@@ -62,25 +62,23 @@ int addr_relevant(u64 addr)
 	return 0;
 }
 
-static u32 vcpu_offset;
+static u64 vcpu_offset;
 
 struct kvm_vcpu *__get_current_vcpu(void)
 {
-	struct kvm_vcpu *vcpu;
-	asm("mov %%gs:(%1), %0" : "=r"(vcpu) : "r"(vcpu_offset));
-	return vcpu;
+	return *this_cpu_ptr((struct kvm_vcpu **)vcpu_offset);
 }
 
 static int perf_event_nmi_handler(unsigned int cmd, struct pt_regs *regs)
 {
-	struct gueststack_stats *stats = &__get_cpu_var(gueststack_stats);
+	struct gueststack_stats *stats = this_cpu_ptr(&gueststack_stats);
 	struct kvm_vcpu *vcpu = __get_current_vcpu();
 	stats->total++;
 	if (vcpu) {
-		u64 *frames = __get_cpu_var(frames_buf);
+		u64 *frames = this_cpu_ptr(frames_buf);
 		int i, page_remainder;
 		struct x86_exception exception = {};
-		struct buf *b = &__get_cpu_var(stack_buf);
+		struct buf *b = this_cpu_ptr(&stack_buf);
 		gva_t rsp = kvm_register_read(vcpu, VCPU_REGS_RSP);
 		gpa_t phys_rsp = kvm_mmu_gva_to_gpa_read(vcpu, rsp, &exception);
 
@@ -106,16 +104,29 @@ static int perf_event_nmi_handler(unsigned int cmd, struct pt_regs *regs)
 
 #define IS_RX_W(x) (((x) | 0x7) == 0x4f)
 #define MOD(x) ((x) >> 6)
-#define RM(x) ((x)&0x7)
+#define RM(x) ((x) & 0x7)
 #define REG(x) (((x) >> 3) & 0x7)
-#define BASE(x) ((x)&0x7)
+#define BASE(x) ((x) & 0x7)
 #define INDEX(x) (((x) >> 3) & 0x7)
 
 /* Search for instruction that moves data form GS to a register */
+/* either with displacement mov gs:($1234). reg      */
+/* or with mov gs:$1234(rip), reg                    */
 /*             GS RX MOV MOD.RM SIB DISPLACEMENT     */
 /* For example 65 48 8b  3c     25  80 41 01 00      */
+/*                       ^                           */
+/*                   mod  reg rm                     */
+/*                   0b00 111 100                    */
 /*             mov    r15,QWORD PTR gs:0x14180       */
-s64 search_relevant_prefix(void *c, int size)
+/* Or                                                */
+/*             GS RX MOV MOD.RM  DISPLACEMENT        */
+/*             65 48 8b  3d      0c 00 00 00         */
+/* 1f 44 00 00 65 48 8b  3d      e3 b1 50 3f         */
+/*                       ^                           */
+/*                   mod  reg rm                     */
+/*                   0b00 111 101                    */
+/*             mov    0xc(%rip),%rdi                 */
+u64 search_relevant_prefix(void *c, int size, bool *found)
 {
 	/* sought instruction is:
 	 * - GS segment override prefix
@@ -129,11 +140,14 @@ s64 search_relevant_prefix(void *c, int size)
 	const int GS_SEG_OVERRIDE = 0x65;
 	const int MOV_M_TO_R_OPCODE = 0x8B;
 	void *end = c + size - inst_len + 1;
+	*found = false;
 	for (;;) {
 		u8 *p;
+		u8 *rip;
 		c = memchr(c, GS_SEG_OVERRIDE, end - c);
 		if (c == NULL)
 			return -1;
+		rip = c;
 		c++;
 		p = c;
 		if (!IS_RX_W(*p))
@@ -144,14 +158,28 @@ s64 search_relevant_prefix(void *c, int size)
 		/* We need direct access to memory with displacement */
 		/* Don't care which registers are used */
 		p++;
-		if (MOD(*p) != 0 || RM(*p) != 0b100)
+		if (MOD(*p) != 0)
 			continue;
-		p++;
-		if (BASE(*p) != 0b101 || INDEX(*p) != 0b100)
-			continue;
-		p++;
-		/* grab displacement32 value */
-		return *(u32 *)p;
+		if (RM(*p) == 0b101) {
+			int instruction_len;
+			s32 displacement;
+			p++;
+			/* return rip+displacement32 value+instruction_len */
+			displacement = *(s32 *)p;
+			/* add displacement length of 4 bytes */
+			instruction_len = (p + 4) - rip;
+			*found = true;
+			return (u64)rip + displacement + instruction_len;
+		} else if (RM(*p) == 0b100) {
+			// in case of MOD/RM 0/100 we need the SIB byte
+			p++;
+			if (BASE(*p) != 0b101 || INDEX(*p) != 0b100)
+				continue;
+			p++;
+			/* grab displacement32 value */
+			*found = true;
+			return *(u32 *)p;
+		}
 	}
 }
 
@@ -159,7 +187,8 @@ void kvm_before_handle_nmi(struct kvm_vcpu *vcpu);
 
 int init_module(void)
 {
-	s64 offset;
+	u64 offset;
+	bool found;
 	struct kvm_vcpu *vcpu;
 	struct kvm_vcpu *vcpu_stencil = (struct kvm_vcpu *)0xDEAD1BEEF;
 
@@ -171,9 +200,11 @@ int init_module(void)
 		       "module loaded?");
 		return -2;
 	}
-	offset = search_relevant_prefix(kvm_is_user_mode_ptr, 20);
-	if (offset == -1) {
-		pr_err("Cannot find current_vcpu offset");
+
+	offset = search_relevant_prefix(kvm_is_user_mode_ptr, 20, &found);
+	if (!found) {
+		pr_err("Cannot find current_vcpu offset: %*ph\n", 20,
+		       kvm_is_user_mode_ptr);
 		return -2;
 	}
 	vcpu_offset = offset;
